@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include </usr/include/stdio.h>
 #include <complex>
@@ -6,8 +7,9 @@
 #include <string>
 #include <algorithm>
 #include <iterator>
-#include <sstream>
 #include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <numeric>
 //g++ -L/usr/include/boost/program_options.hpp ./main.cpp -o ./main.o -lboost_program_options
 namespace po = boost::program_options;
 using namespace std;
@@ -119,8 +121,8 @@ int main(int argc, char* argv[]) {
     desc.add_options()
         ("help,H", "Print Help Message" )
         ("voltage,V", po::value<float>()->default_value(3.0), "Voltage of the source" )
-        ("inductance,I", po::value< std::vector<string> >()->multitoken(), "Inductance of the inductor (milli, micro, nano, pico)" )
-        ("capacitance,C", po::value< std::vector<string> >()->multitoken(), "Capacitance of the Capacitor (milli, micro, nano, pico)" )
+        ("inductance,I", po::value< std::string >()->multitoken(), "Inductance of the inductor (milli, micro, nano, pico)" )
+        ("capacitance,C", po::value< std::string >()->multitoken(), "Capacitance of the Capacitor (milli, micro, nano, pico)" )
         ("resistance,R", po::value<float>()->default_value(100), "Resistance of the resistor in ohms ONLY, Defaults to \"100 ohm\"")
         ("series,S", po::value< vector<string> >(), "\"true\" if series, \"false\" if Parallel, DEFAULTS TO FALSE" )
     ;
@@ -142,30 +144,46 @@ int main(int argc, char* argv[]) {
         lc_circuit.series = false;
     };
 
+  try {
+    std::string string_input0 = arguments["capacitance"].as< std::string >();
     std::vector<string> capacitance_args;
-    string split_input0 = arguments["capacitance"].as<string>();
-    boost:split(capacitance_args , split_input0 , boost::is_any_of(" "));
+    boost::split(capacitance_args , string_input0 , boost::is_any_of(" "));
 
     if (capacitance_args[1] == "nano") {
-        lc_circuit.capacitance = stoi(capacitance_args[0]) * NANO;
+        float cap = std::stoi(capacitance_args[0]) * NANO;
+        lc_circuit.capacitance = cap;
     } else if (capacitance_args[1] == "micro") {
-        lc_circuit.capacitance = stoi(capacitance_args[0]) * MICRO;
+        float cap = std::stoi(capacitance_args[0]) * MICRO;
+        lc_circuit.capacitance = cap;
     } else if (capacitance_args[1] == "pico") {
-        lc_circuit.capacitance = stoi(capacitance_args[0]) * PICO;
+        float cap = std::stoi(capacitance_args[0]) * PICO;
+        lc_circuit.capacitance = cap;
+    } else if (capacitance_args[1] == "milli") {
+        float cap = std::stoi(capacitance_args[0]) * MILLI;
+        lc_circuit.capacitance = cap;
     };
 
+    std::string string_input1 = arguments["inductance"].as< std::string >();
     std::vector<string> inductance_args;
-    string split_input1 = arguments["inductance"].as<string>();
-    boost::split(inductance_args , split_input1 , boost::is_any_of(" "));
-
+    boost::split(inductance_args , string_input1 , boost::is_any_of(" "));
     if (inductance_args[1] == "nano") {
-        lc_circuit.inductance = stoi(inductance_args[0]) * NANO;
+        float ind = std::stoi(inductance_args[0]) * NANO;
+        lc_circuit.inductance = ind;
     } else if (inductance_args[1] == "micro") {
-        lc_circuit.inductance = stoi(inductance_args[0]) * MICRO;
+        float ind = std::stoi(inductance_args[0]) * MICRO;
+        lc_circuit.inductance = ind;
     } else if (inductance_args[1] == "pico") {
-        lc_circuit.inductance = stoi(inductance_args[0]) * PICO;
+        float ind = std::stoi(inductance_args[0]) * PICO;
+        lc_circuit.inductance = ind;
+    } else if (inductance_args[1] == "milli") {
+        float ind = std::stoi(inductance_args[0]) * MILLI;
+        lc_circuit.inductance = ind;
     };
 
+  } catch (std::exception& e) {
+        std::cerr << "ERROR: " << e.what() << "\n";
+        return 1;
+  };
     lc_circuit.resistance = arguments["resistance"].as<float>();
     //lc_circuit.capacitance = arguments["capacitance"].as< vector<std:string> >();
     //lc_circuit.inductance = arguments["inductance"].as< vector<std:string> >();
@@ -175,5 +193,3 @@ int main(int argc, char* argv[]) {
     cout << "Resonating Freq: " << lc_circuit.resonant_frequency_hertz << "\n";
     cout << "current: " << lc_circuit.current << "\n";    //cout <<  << "\n";
 };
-
-
